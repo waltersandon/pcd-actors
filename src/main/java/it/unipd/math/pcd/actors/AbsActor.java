@@ -37,33 +37,97 @@
  */
 package it.unipd.math.pcd.actors;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Defines common properties of all actors.
  *
- * @author Riccardo Cardin
- * @version 1.0
- * @since 1.0
+ * @author Walter Sandon
+ * @version 1.1
+ * @since 1.1
  */
-public abstract class AbsActor<T extends Message> implements Actor<T> {
+public abstract class AbsActor<T extends Message> implements Actor<T>, Runnable {
 
-    /**
-     * Self-reference of the actor
-     */
+
+    //mailbox where messages will be send
+    private final MailBox mailBox = new MailBoxFifo();
+
+    //Self-reference of the actor
+
     protected ActorRef<T> self;
 
-    /**
-     * Sender of the current message
-     */
-    protected ActorRef<T> sender;
+    //Sender of the current message
+    protected ActorRef<? extends Message> sender;
 
-    /**
-     * Sets the self-referece.
-     *
-     * @param self The reference to itself
-     * @return The actor.
-     */
+    //Flag for interruption.
+    private AtomicBoolean isInterrupted = new AtomicBoolean(false);
+
+    public boolean getFlag(){
+        return isInterrupted.get();
+    }
+
+
+    @Override
+    public void run() {
+
+        while (!Thread.currentThread().isInterrupted()) {
+            //I take the messagge into the mailbox
+            MessageContent<T> toProcess = mailBox.pop();
+            /*
+            By synchronizing the mail box, check that has more messages
+            and that it isn't already stopped.
+            If it isn't, we set the sender and the message
+             */
+            synchronized (mailBox) {
+                while (mailBox.size() > 0) {
+                    if (!isInterrupted.get()) try {
+                        mailBox.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    else return;//the mailBox is empty
+                }
+                //da vedere se è il caso di togliere il messaggio dalla mailBox
+            }
+            setSender((ActorRef<T>) toProcess.getActorRef());
+            receive(toProcess.getMessage());
+        }
+
+
+    }
+
+
+    protected final void setSender(ActorRef<T> sender) {
+
+        this.sender = sender;
+    }
+
     protected final Actor<T> setSelf(ActorRef<T> self) {
+
         this.self = self;
         return this;
+    }
+
+
+    //set the flag for interruption at true only if it isn't at now
+
+    protected final void interrupt() {
+
+        isInterrupted.set(true);//is atomic
+        synchronized(mailBox) {
+            mailBox.notifyAll();
+        }
+    }
+
+    // Insert into mail box only if the actor is not interrupted
+
+    public final void insertMessage(T message, ActorRef<T> sender) {
+
+        synchronized (mailBox) {
+            if (!isInterrupted.get()) {
+                mailBox.put(message,sender);
+                mailBox.notifyAll();
+            }
+        }
     }
 }

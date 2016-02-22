@@ -40,23 +40,39 @@ package it.unipd.math.pcd.actors;
 import it.unipd.math.pcd.actors.exceptions.NoSuchActorException;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+
+
 
 /**
  * A map-based implementation of the actor system.
  *
- * @author Riccardo Cardin
- * @version 1.0
- * @since 1.0
+ * @author Walter Sandon
+ * @version 1.1
+ * @since 1.1
  */
 public abstract class AbsActorSystem implements ActorSystem {
 
-    /**
-     * Associates every Actor created with an identifier.
-     */
-    private Map<ActorRef<?>, Actor<?>> actors;
+
+
+     //Threadpool of actors that creates Thread as needed
+
+    private ExecutorService executor = Executors.newCachedThreadPool();
+
+
+    //Associates every Actor created with an identifier.
+    private Map<ActorRef<?>, AbsActor<? extends Message>> actors;
+
+    //I need to implement AbsActorSystem with a concrete map as a HashMap
+    public AbsActorSystem(){
+        actors = new ConcurrentHashMap<>();
+    }
 
     @Override
-    public ActorRef<? extends Message> actorOf(Class<? extends Actor> actor, ActorMode mode) {
+    public ActorRef<? extends Message> actorOf(final Class<? extends Actor>  actor, final ActorMode mode) {
 
         // ActorRef instance
         ActorRef<?> reference;
@@ -66,7 +82,9 @@ public abstract class AbsActorSystem implements ActorSystem {
             // Create the new instance of the actor
             Actor actorInstance = ((AbsActor) actor.newInstance()).setSelf(reference);
             // Associate the reference to the actor
-            actors.put(reference, actorInstance);
+            actors.put(reference,(AbsActor) actorInstance);
+            //Put a actor into a threadpool
+            executor.execute((Runnable) actorInstance);
 
         } catch (InstantiationException | IllegalAccessException e) {
             throw new NoSuchActorException(e);
@@ -74,10 +92,44 @@ public abstract class AbsActorSystem implements ActorSystem {
         return reference;
     }
 
+
+
     @Override
     public ActorRef<? extends Message> actorOf(Class<? extends Actor> actor) {
         return this.actorOf(actor, ActorMode.LOCAL);
     }
 
-    protected abstract ActorRef createActorReference(ActorMode mode);
+    protected abstract ActorRef createActorReference(ActorMode mode);//da implementare in AbsActrorSystemConcrete
+
+
+
+
+    protected  <T extends Message> AbsActor<T> search(ActorRef<?> toSearch) throws NoSuchActorException {
+
+        Actor toS = actors.get(toSearch);
+        if (toS == null)
+            throw new NoSuchActorException();
+        return (AbsActor<T>) toS;
+    }
+
+    Map<ActorRef<?>, AbsActor<? extends Message>> getMap(){
+
+        return actors;
+    }
+
+    //Search the actor to stop and interrupt this
+    @Override
+    public void stop(final ActorRef<?> actorToStop) {
+        ((AbsActor) search(actorToStop)).interrupt();
+        actors.remove(actorToStop);
+    }
+
+    //stop all the actors that are in the system
+    @Override
+    public void stop() {
+        for (Map.Entry<ActorRef<? extends Message>, AbsActor<? extends Message>> actor : actors.entrySet()) {
+            actor.getValue().interrupt();
+            actors.remove(actor);
+        }
+    }
 }
